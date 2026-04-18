@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import FadeIn from "@/components/FadeIn";
 import { Badge } from "@/components/ui/badge";
 import { NumberTicker } from "@/components/NumberTicker";
@@ -7,25 +7,21 @@ import { AlertTriangle, Stethoscope, CheckCircle2 } from "lucide-react";
 import { usePlan, isFeatureUnlocked, FEATURES } from "@/contexts/PlanContext";
 import LockedFeaturePage from "@/components/dashboard/LockedFeaturePage";
 import EmptyState from "@/components/EmptyState";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 
 const dummyFeature = FEATURES.find(f => f.id === "prioridade")!;
 
-const kpis = [
-  { label: "Triagens Este Mês", value: 7, icon: Stethoscope },
-  { label: "Urgentes", value: 2, icon: AlertTriangle, badge: "bg-amber-500/20 text-amber-400 border-amber-500/30", badgeText: "Atenção" },
-  { label: "Emergências", value: 0, icon: CheckCircle2, badge: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", badgeText: "Tudo ok" },
-];
-
-const triagens = [
-  { id: 1, paciente: "Maria Santos", sintomas: "Dor torácica intensa", nivel: "emergencia" as const, pontuacao: 87, especialista: "Cardiologista", data: "11 Abr, 14:32" },
-  { id: 2, paciente: "João Costa", sintomas: "Febre alta persistente", nivel: "urgente" as const, pontuacao: 65, especialista: "Clínico Geral", data: "11 Abr, 13:15" },
-  { id: 3, paciente: "Ana Silva", sintomas: "Tonturas recorrentes", nivel: "urgente" as const, pontuacao: 58, especialista: "Neurologista", data: "10 Abr, 11:40" },
-  { id: 4, paciente: "Pedro Reis", sintomas: "Dor nas costas", nivel: "rotina" as const, pontuacao: 30, especialista: "Fisioterapeuta", data: "10 Abr, 09:22" },
-  { id: 5, paciente: "Carla Mendes", sintomas: "Dificuldade em dormir", nivel: "rotina" as const, pontuacao: 25, especialista: "Psicólogo", data: "09 Abr, 16:05" },
-  { id: 6, paciente: "Sofia Almeida", sintomas: "Tosse persistente", nivel: "rotina" as const, pontuacao: 35, especialista: "Clínico Geral", data: "08 Abr, 14:30" },
-  { id: 7, paciente: "Ricardo Lopes", sintomas: "Ansiedade intensa", nivel: "urgente" as const, pontuacao: 62, especialista: "Psiquiatra", data: "07 Abr, 10:15" },
-  { id: 8, paciente: "Marta Ferreira", sintomas: "Dor abdominal", nivel: "rotina" as const, pontuacao: 28, especialista: "Gastroenterologista", data: "06 Abr, 09:00" },
-];
+interface Triagem {
+  id: string | number;
+  paciente: string;
+  sintomas: string;
+  nivel: "emergencia" | "urgente" | "rotina";
+  pontuacao: number;
+  especialista: string;
+  data: string;
+}
 
 const nivelBadge = (n: string) =>
   n === "emergencia" ? "bg-red-500/20 text-red-400 border-red-500/30"
@@ -35,13 +31,60 @@ const nivelBadge = (n: string) =>
 const nivelLabel = (n: string) =>
   n === "emergencia" ? "Emergência" : n === "urgente" ? "Urgente" : "Rotina";
 
+function normalizeNivel(n: string | undefined): Triagem["nivel"] {
+  const v = (n || "").toLowerCase();
+  if (v.includes("emerg")) return "emergencia";
+  if (v.includes("urgen")) return "urgente";
+  return "rotina";
+}
+
 export default function DashboardTriagens() {
   const { currentPlan } = usePlan();
+  const { clienteId } = useAuth();
   const [tab, setTab] = useState("todas");
+  const [triagens, setTriagens] = useState<Triagem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!clienteId) { setLoading(false); return; }
+    let active = true;
+    (async () => {
+      setLoading(true);
+      const { data: rows, error } = await supabase
+        .from("n8n_triagens")
+        .select("*")
+        .eq("cliente_id", clienteId)
+        .order("criado_em", { ascending: false });
+      if (!active) return;
+      if (error) { console.error(error); setLoading(false); return; }
+      const mapped: Triagem[] = (rows || []).map((r: any) => ({
+        id: r.id,
+        paciente: r.paciente ?? r.nome_paciente ?? "—",
+        sintomas: r.sintomas ?? "—",
+        nivel: normalizeNivel(r.nivel ?? r.urgencia),
+        pontuacao: r.pontuacao ?? 0,
+        especialista: r.especialista ?? r.especialidade ?? "—",
+        data: r.criado_em ? new Date(r.criado_em).toLocaleString("pt-PT") : "—",
+      }));
+      setTriagens(mapped);
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, [clienteId]);
 
   if (!isFeatureUnlocked("scale", currentPlan)) {
     return <LockedFeaturePage feature={{ ...dummyFeature, label: "Triagens", description: "Histórico de triagens automáticas da sua clínica.", benefit: "Casos urgentes nunca mais ficam esquecidos." }} />;
   }
+
+  const totalMes = triagens.length;
+  const urgentes = triagens.filter(t => t.nivel === "urgente").length;
+  const emergencias = triagens.filter(t => t.nivel === "emergencia").length;
+
+  const kpis = [
+    { label: "Triagens Este Mês", value: totalMes, icon: Stethoscope },
+    { label: "Urgentes", value: urgentes, icon: AlertTriangle, badge: "bg-amber-500/20 text-amber-400 border-amber-500/30", badgeText: "Atenção" },
+    { label: "Emergências", value: emergencias, icon: CheckCircle2, badge: emergencias === 0 ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-red-500/20 text-red-400 border-red-500/30", badgeText: emergencias === 0 ? "Tudo ok" : "Crítico" },
+  ];
 
   const filtered = tab === "todas" ? triagens : triagens.filter(t => t.nivel === tab);
 
@@ -70,7 +113,11 @@ export default function DashboardTriagens() {
           <TabsTrigger value="rotina">Rotina</TabsTrigger>
         </TabsList>
         <TabsContent value={tab}>
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+            </div>
+          ) : filtered.length === 0 ? (
             <EmptyState icon={CheckCircle2} title="Nenhuma triagem encontrada" description="Não existem triagens para este filtro." />
           ) : (
           <div className="gradient-border rounded-xl bg-card overflow-x-auto">

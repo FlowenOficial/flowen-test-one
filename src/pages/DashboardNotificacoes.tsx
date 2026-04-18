@@ -4,6 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, CreditCard, Bell, Settings } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
 interface Notification {
   id: string | number;
@@ -14,19 +18,6 @@ interface Notification {
   read: boolean;
 }
 
-const initialNotifications: Notification[] = [
-  { id: 1, type: "escalacao", title: "Nova escalação", message: "Maria Santos enviou mensagem urgente sobre receita médica", time: "Há 10 min", read: false },
-  { id: 2, type: "pagamento", title: "Pagamento confirmado", message: "Pagamento de €45 confirmado via MBway — Ana Silva", time: "Há 25 min", read: false },
-  { id: 3, type: "sistema", title: "Atualização do sistema", message: "Nova versão do agente de agendamento disponível", time: "Há 1h", read: false },
-  { id: 4, type: "escalacao", title: "Escalação resolvida", message: "João Costa — reclamação sobre faturação foi resolvida", time: "Há 2h", read: true },
-  { id: 5, type: "pagamento", title: "Faturação em 3 dias", message: "Próxima faturação de €129 em 28 Abr", time: "Há 3h", read: true },
-  { id: 6, type: "sistema", title: "Manutenção agendada", message: "Manutenção preventiva agendada para 15 Abr às 03:00", time: "Há 5h", read: true },
-  { id: 7, type: "escalacao", title: "Nova escalação", message: "Carla Mendes — pedido de cancelamento urgente", time: "Ontem", read: true },
-  { id: 8, type: "pagamento", title: "Pagamento falhado", message: "Tentativa de pagamento falhou — Pedro Reis", time: "Ontem", read: false },
-  { id: 9, type: "sistema", title: "Relatório disponível", message: "Relatório mensal de Março já está disponível", time: "Há 2 dias", read: true },
-  { id: 10, type: "escalacao", title: "Escalação resolvida", message: "Sofia Almeida — pedido de relatório resolvido automaticamente", time: "Há 3 dias", read: true },
-];
-
 const iconMap = {
   escalacao: AlertTriangle,
   pagamento: CreditCard,
@@ -34,33 +25,51 @@ const iconMap = {
   plano_actualizado: Bell,
 };
 
+function mapTipo(t: string | undefined): Notification["type"] {
+  if (t === "escalacao") return "escalacao";
+  if (t === "pagamento") return "pagamento";
+  if (t === "plano_actualizado") return "plano_actualizado";
+  return "sistema";
+}
+
 export default function DashboardNotificacoes() {
-  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
+  const { clienteId } = useAuth();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("todas");
 
-  // Load localStorage notifications for this client
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("cliente_notificacoes_1");
-      if (stored) {
-        const parsed = JSON.parse(stored) as Array<{
-          id: string; tipo: string; titulo: string; mensagem: string; lida: boolean; data: string;
-        }>;
-        const extra: Notification[] = parsed.map(n => ({
-          id: n.id,
-          type: (n.tipo === "plano_actualizado" ? "plano_actualizado" : "sistema") as Notification["type"],
-          title: n.titulo,
-          message: n.mensagem,
-          time: n.data,
-          read: n.lida,
-        }));
-        setNotifications(prev => [...extra, ...prev]);
-      }
-    } catch { /* ignore */ }
-  }, []);
+    if (!clienteId) { setLoading(false); return; }
+    let active = true;
+    (async () => {
+      setLoading(true);
+      const { data: rows, error } = await supabase
+        .from("notificacoes")
+        .select("*")
+        .eq("cliente_id", clienteId)
+        .order("criado_em", { ascending: false });
+      if (!active) return;
+      if (error) { console.error(error); setLoading(false); return; }
+      const mapped: Notification[] = (rows || []).map((r: any) => ({
+        id: r.id,
+        type: mapTipo(r.tipo),
+        title: r.titulo ?? "Notificação",
+        message: r.mensagem ?? "",
+        time: r.criado_em ? new Date(r.criado_em).toLocaleString("pt-PT") : "—",
+        read: !!r.lida,
+      }));
+      setNotifications(mapped);
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, [clienteId]);
 
-  const markAllRead = () => {
+  const markAllRead = async () => {
+    if (!clienteId) return;
+    const { error } = await supabase.from("notificacoes").update({ lida: true }).eq("cliente_id", clienteId);
+    if (error) { toast.error("Erro ao actualizar."); return; }
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    toast.success("Todas as notificações marcadas como lidas.");
   };
 
   const filtered = tab === "todas" ? notifications : notifications.filter(n => {
@@ -85,7 +94,11 @@ export default function DashboardNotificacoes() {
           <TabsTrigger value="sistema">Sistema</TabsTrigger>
         </TabsList>
         <TabsContent value={tab}>
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
+            </div>
+          ) : filtered.length === 0 ? (
             <EmptyState icon={Bell} title="Nenhuma notificação" description="Estás a par de tudo. Novas notificações aparecerão aqui." />
           ) : (
           <div className="space-y-2">
