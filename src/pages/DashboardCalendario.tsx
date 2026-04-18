@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import FadeIn from "@/components/FadeIn";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,9 @@ import {
   Tooltip, TooltipContent, TooltipTrigger,
 } from "@/components/ui/tooltip";
 import EmptyState from "@/components/EmptyState";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface Appointment {
   date: string;
@@ -16,36 +19,6 @@ interface Appointment {
   patient: string;
   type: string;
   status: "confirmado" | "pendente" | "cancelado" | "falta" | "realizado";
-}
-
-const names = ["Ana Silva", "João Costa", "Maria Santos", "Pedro Reis", "Carla Mendes", "Sofia Almeida", "Ricardo Lopes", "Marta Ferreira", "Tiago Oliveira", "Inês Pinto", "Bruno Sousa", "Catarina Neves", "Diogo Ramos", "Helena Martins", "Filipe Correia"];
-const types = ["Consulta Geral", "Fisioterapia", "Nutrição", "Psicologia"];
-const hours = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30"];
-
-function generateAppointments(year: number, month: number): Appointment[] {
-  const result: Appointment[] = [];
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const seed = year * 100 + month;
-  let s = seed;
-  const rand = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s; };
-
-  const count = 10 + (rand() % 6);
-  for (let i = 0; i < count; i++) {
-    const day = 1 + (rand() % daysInMonth);
-    const dow = new Date(year, month, day).getDay();
-    if (dow === 0 || dow === 6) continue;
-    const dd = String(day).padStart(2, "0");
-    const mm = String(month + 1).padStart(2, "0");
-    const statuses: Appointment["status"][] = ["confirmado", "confirmado", "realizado", "pendente", "cancelado", "falta", "realizado"];
-    result.push({
-      date: `${year}-${mm}-${dd}`,
-      hour: hours[rand() % hours.length],
-      patient: names[rand() % names.length],
-      type: types[rand() % types.length],
-      status: statuses[rand() % statuses.length],
-    });
-  }
-  return result.sort((a, b) => a.date.localeCompare(b.date) || a.hour.localeCompare(b.hour));
 }
 
 const monthNames = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -74,25 +47,72 @@ const statusLabel: Record<string, string> = {
   realizado: "Realizado",
 };
 
+function normalizeStatus(s: string | undefined): Appointment["status"] {
+  const v = (s || "").toLowerCase();
+  if (v.includes("confirm")) return "confirmado";
+  if (v.includes("pend")) return "pendente";
+  if (v.includes("cancel")) return "cancelado";
+  if (v.includes("falt") || v.includes("no_show") || v.includes("noshow")) return "falta";
+  if (v.includes("realiz") || v.includes("done") || v.includes("complet")) return "realizado";
+  return "pendente";
+}
+
 export default function DashboardCalendario() {
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 3, 1));
+  const { clienteId } = useAuth();
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [view, setView] = useState<"mensal" | "semanal">("mensal");
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
-  const appointments = useMemo(() => generateAppointments(year, month), [year, month]);
+
+  useEffect(() => {
+    if (!clienteId) { setLoading(false); return; }
+    let active = true;
+    (async () => {
+      setLoading(true);
+      const { data: rows, error } = await supabase
+        .from("agendamentos")
+        .select("*")
+        .eq("cliente_id", clienteId);
+      if (!active) return;
+      if (error) { console.error(error); setLoading(false); return; }
+      const mapped: Appointment[] = (rows || []).map((r: any) => {
+        const dt = r.data_marcacao ? new Date(r.data_marcacao) : null;
+        return {
+          date: dt ? dt.toISOString().split("T")[0] : "",
+          hour: dt ? dt.toTimeString().slice(0, 5) : (r.hora ?? "—"),
+          patient: r.paciente ?? r.nome_paciente ?? "—",
+          type: r.tipo ?? r.servico ?? "Consulta",
+          status: normalizeStatus(r.estado ?? r.status),
+        };
+      }).filter(a => a.date);
+      setAppointments(mapped);
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, [clienteId]);
+
+  const monthAppointments = useMemo(
+    () => appointments.filter(a => {
+      const d = new Date(a.date);
+      return d.getFullYear() === year && d.getMonth() === month;
+    }),
+    [appointments, year, month]
+  );
 
   const apptsByDate = useMemo(() => {
     const map: Record<string, Appointment[]> = {};
-    appointments.forEach(a => { (map[a.date] ||= []).push(a); });
+    monthAppointments.forEach(a => { (map[a.date] ||= []).push(a); });
     return map;
-  }, [appointments]);
+  }, [monthAppointments]);
 
-  const totalConsultas = appointments.length;
-  const pendentes = appointments.filter(a => a.status === "pendente").length;
-  const canceladas = appointments.filter(a => a.status === "cancelado").length;
-  const faltas = appointments.filter(a => a.status === "falta").length;
+  const totalConsultas = monthAppointments.length;
+  const pendentes = monthAppointments.filter(a => a.status === "pendente").length;
+  const canceladas = monthAppointments.filter(a => a.status === "cancelado").length;
+  const faltas = monthAppointments.filter(a => a.status === "falta").length;
 
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
@@ -105,13 +125,23 @@ export default function DashboardCalendario() {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const selectedAppts = selectedDay ? apptsByDate[selectedDay] || [] : [];
+  const selectedAppts = selectedDay ? (apptsByDate[selectedDay] || []) : [];
 
   const weekHours = ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"];
-  const today = new Date(year, month, 11);
+  const today = new Date();
   const dayOfWeek = today.getDay() === 0 ? 6 : today.getDay() - 1;
   const weekStart = new Date(today);
   weekStart.setDate(today.getDate() - dayOfWeek);
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-6 w-96" />
+        <Skeleton className="h-96 w-full rounded-xl" />
+      </div>
+    );
+  }
 
   return (
     <FadeIn>
@@ -135,7 +165,9 @@ export default function DashboardCalendario() {
         <Button variant="ghost" size="icon" onClick={nextMonth}><ChevronRight size={18} /></Button>
       </div>
 
-      {view === "mensal" ? (
+      {appointments.length === 0 ? (
+        <EmptyState icon={CalendarIcon} title="Sem agendamentos" description="Ainda não existem consultas agendadas." />
+      ) : view === "mensal" ? (
         <div className="gradient-border rounded-xl p-4 bg-card">
           <div className="grid grid-cols-7 gap-1 mb-2">
             {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map(d => (

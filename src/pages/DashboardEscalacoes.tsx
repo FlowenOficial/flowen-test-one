@@ -1,13 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import FadeIn from "@/components/FadeIn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle2 } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
 interface Escalacao {
-  id: number;
+  id: number | string;
   paciente: string;
   telefone: string;
   mensagem: string;
@@ -15,23 +19,43 @@ interface Escalacao {
   status: "pendente" | "resolvido";
 }
 
-const initialData: Escalacao[] = [
-  { id: 1, paciente: "Maria Santos", telefone: "912 345 678", mensagem: "Pedido de receita médica urgente", data: "11 Abr, 14:32", status: "pendente" },
-  { id: 2, paciente: "João Costa", telefone: "923 456 789", mensagem: "Reclamação sobre faturação incorreta", data: "11 Abr, 13:15", status: "pendente" },
-  { id: 3, paciente: "Ana Silva", telefone: "934 567 890", mensagem: "Alteração de horário não processada", data: "11 Abr, 11:40", status: "resolvido" },
-  { id: 4, paciente: "Pedro Reis", telefone: "915 678 901", mensagem: "Dúvida sobre tratamento em curso", data: "10 Abr, 16:22", status: "resolvido" },
-  { id: 5, paciente: "Carla Mendes", telefone: "926 789 012", mensagem: "Cancelamento urgente de consulta", data: "10 Abr, 14:05", status: "pendente" },
-  { id: 6, paciente: "Sofia Almeida", telefone: "937 890 123", mensagem: "Pedido de relatório médico", data: "10 Abr, 10:30", status: "resolvido" },
-  { id: 7, paciente: "Ricardo Lopes", telefone: "918 901 234", mensagem: "Problema com confirmação automática", data: "09 Abr, 15:45", status: "resolvido" },
-  { id: 8, paciente: "Marta Ferreira", telefone: "929 012 345", mensagem: "Reembolso não recebido", data: "09 Abr, 11:10", status: "resolvido" },
-];
-
 export default function DashboardEscalacoes() {
-  const [data, setData] = useState(initialData);
+  const { clienteId } = useAuth();
+  const [data, setData] = useState<Escalacao[]>([]);
+  const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("todas");
 
-  const markResolved = (id: number) => {
+  useEffect(() => {
+    if (!clienteId) { setLoading(false); return; }
+    let active = true;
+    (async () => {
+      setLoading(true);
+      const { data: rows, error } = await supabase
+        .from("escalacoes")
+        .select("*")
+        .eq("cliente_id", clienteId)
+        .order("criado_em", { ascending: false });
+      if (!active) return;
+      if (error) { console.error(error); setLoading(false); return; }
+      const mapped: Escalacao[] = (rows || []).map((r: any) => ({
+        id: r.id,
+        paciente: r.paciente ?? r.nome_paciente ?? "—",
+        telefone: r.telefone ?? "—",
+        mensagem: r.mensagem ?? r.motivo ?? "—",
+        data: r.criado_em ? new Date(r.criado_em).toLocaleString("pt-PT") : "—",
+        status: (r.estado ?? r.status ?? "pendente") as "pendente" | "resolvido",
+      }));
+      setData(mapped);
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, [clienteId]);
+
+  const markResolved = async (id: number | string) => {
+    const { error } = await supabase.from("escalacoes").update({ estado: "resolvido" }).eq("id", id);
+    if (error) { toast.error("Erro ao actualizar."); return; }
     setData(prev => prev.map(e => e.id === id ? { ...e, status: "resolvido" } : e));
+    toast.success("Escalação marcada como resolvida.");
   };
 
   const filtered = tab === "todas" ? data : data.filter(e => e.status === (tab === "pendentes" ? "pendente" : "resolvido"));
@@ -46,7 +70,11 @@ export default function DashboardEscalacoes() {
           <TabsTrigger value="resolvidas">Resolvidas</TabsTrigger>
         </TabsList>
         <TabsContent value={tab}>
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+            </div>
+          ) : filtered.length === 0 ? (
             <EmptyState icon={CheckCircle2} title="Nenhuma escalação pendente" description="A Fernanda está a gerir tudo sem precisar de ajuda humana." />
           ) : (
           <div className="gradient-border rounded-xl bg-card overflow-x-auto">

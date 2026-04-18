@@ -10,6 +10,7 @@ import { LogOut, Bell, Search, Sun, Moon } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
@@ -24,10 +25,10 @@ const mockNotifications = [
 export default function DashboardLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [notifCount] = useState(3);
+  const [notifCount, setNotifCount] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
-  const { signOut } = useAuth();
+  const { signOut, clienteId } = useAuth();
 
   // Ctrl+K / Cmd+K shortcut
   useEffect(() => {
@@ -40,6 +41,49 @@ export default function DashboardLayout() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // Load initial unread count + Realtime subscriptions
+  useEffect(() => {
+    if (!clienteId) return;
+
+    (async () => {
+      const { count } = await supabase
+        .from("notificacoes")
+        .select("*", { count: "exact", head: true })
+        .eq("cliente_id", clienteId)
+        .eq("lida", false);
+      if (typeof count === "number") setNotifCount(count);
+    })();
+
+    const escChannel = supabase
+      .channel(`escalacoes-${clienteId}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "escalacoes",
+        filter: `cliente_id=eq.${clienteId}`,
+      }, () => {
+        setNotifCount(prev => prev + 1);
+      })
+      .subscribe();
+
+    const notifChannel = supabase
+      .channel(`notificacoes-${clienteId}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "notificacoes",
+        filter: `cliente_id=eq.${clienteId}`,
+      }, () => {
+        setNotifCount(prev => prev + 1);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(escChannel);
+      supabase.removeChannel(notifChannel);
+    };
+  }, [clienteId]);
 
   const handleLogout = async () => {
     await signOut();

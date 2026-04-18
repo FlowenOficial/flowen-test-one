@@ -5,24 +5,16 @@ import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/NumberTicker";
 import {
   CalendarCheck, AlertTriangle, TrendingUp, CreditCard,
-  MessageSquare, Bell, Calendar, Heart, Bot, Phone,
+  Calendar, Phone,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
-
-const kpis = [
-  { label: "Agendamentos Este Mês", value: 148, icon: CalendarCheck, trend: "+22%", trendColor: "text-emerald-400" },
-  { label: "No-Shows Evitados", value: 34, icon: AlertTriangle, trend: "89% comparência", trendColor: "text-primary" },
-  { label: "Escalações Pendentes", value: 3, icon: TrendingUp, badge: true, badgeColor: "bg-red-500/20 text-red-400 border-red-500/30", badgeText: "3 pendentes" },
-  { label: "Próxima Faturação", value: 129, icon: CreditCard, isText: true, displayText: "28 Abr — €129", badge: true, badgeColor: "bg-primary/20 text-primary border-primary/30", badgeText: "Em 17 dias" },
-];
-
-const weeklyAppointments = [
-  { name: "Sem 1", value: 16 }, { name: "Sem 2", value: 22 }, { name: "Sem 3", value: 19 },
-  { name: "Sem 4", value: 25 }, { name: "Sem 5", value: 18 }, { name: "Sem 6", value: 21 },
-  { name: "Sem 7", value: 14 }, { name: "Sem 8", value: 23 },
-];
+import { Skeleton } from "@/components/ui/skeleton";
+import EmptyState from "@/components/EmptyState";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
 const weeklyAttendance = [
   { name: "Sem 1", value: 82 }, { name: "Sem 2", value: 86 }, { name: "Sem 3", value: 84 },
@@ -30,39 +22,105 @@ const weeklyAttendance = [
   { name: "Sem 7", value: 87 }, { name: "Sem 8", value: 92 },
 ];
 
+const chartTooltipStyle = { background: "hsl(220,30%,8%)", border: "1px solid hsl(220,20%,18%)", borderRadius: 8 };
+
 interface Escalacao {
-  id: number;
+  id: string | number;
   paciente: string;
   hora: string;
   status: "pendente" | "resolvido";
 }
 
-const initialEscalacoes: Escalacao[] = [
-  { id: 1, paciente: "Maria Santos", hora: "Há 10 min", status: "pendente" },
-  { id: 2, paciente: "João Costa", hora: "Há 1h", status: "pendente" },
-  { id: 3, paciente: "Ana Silva", hora: "Há 3h", status: "resolvido" },
-  { id: 4, paciente: "Pedro Reis", hora: "Ontem", status: "pendente" },
-];
-
-const recentActivity = [
-  { icon: Calendar, text: "Agendamento confirmado — Sofia Almeida, amanhã 14h", time: "Há 5 min" },
-  { icon: Bell, text: "Lembrete enviado — Pedro Reis, consulta às 10:30", time: "Há 12 min" },
-  { icon: Bot, text: "Mensagem respondida automaticamente — Ana Silva", time: "Há 20 min" },
-  { icon: Heart, text: "Follow-up D+1 enviado — Carla Mendes", time: "Há 45 min" },
-  { icon: Calendar, text: "Novo agendamento — João Costa, Fisioterapia", time: "Há 1h" },
-  { icon: MessageSquare, text: "Escalação resolvida — Ricardo Lopes", time: "Há 2h" },
-];
-
-const chartTooltipStyle = { background: "hsl(220,30%,8%)", border: "1px solid hsl(220,20%,18%)", borderRadius: 8 };
+interface PendingAppt {
+  id: string | number;
+  nome: string;
+  tipo: string;
+  hora: string;
+}
 
 export default function DashboardOverview() {
-  const [escalacoes, setEscalacoes] = useState(initialEscalacoes);
+  const { clienteId } = useAuth();
+  const [escalacoes, setEscalacoes] = useState<Escalacao[]>([]);
+  const [pendentes, setPendentes] = useState<PendingAppt[]>([]);
+  const [agendamentosCount, setAgendamentosCount] = useState(0);
+  const [escalacoesPendentes, setEscalacoesPendentes] = useState(0);
+  const [weeklyAppts, setWeeklyAppts] = useState<{ name: string; value: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { const t = setTimeout(() => setLoading(false), 800); return () => clearTimeout(t); }, []);
+  useEffect(() => {
+    if (!clienteId) { setLoading(false); return; }
+    let active = true;
+    (async () => {
+      setLoading(true);
+      const [escResp, agResp] = await Promise.all([
+        supabase.from("escalacoes").select("*").eq("cliente_id", clienteId).order("criado_em", { ascending: false }),
+        supabase.from("agendamentos").select("*").eq("cliente_id", clienteId),
+      ]);
+      if (!active) return;
 
-  const markResolved = (id: number) => {
+      const escRows = escResp.data || [];
+      const escMapped: Escalacao[] = escRows.slice(0, 5).map((r: any) => ({
+        id: r.id,
+        paciente: r.paciente ?? r.nome_paciente ?? "—",
+        hora: r.criado_em ? new Date(r.criado_em).toLocaleString("pt-PT") : "—",
+        status: (r.estado ?? r.status ?? "pendente") as "pendente" | "resolvido",
+      }));
+      setEscalacoes(escMapped);
+      setEscalacoesPendentes(escRows.filter((r: any) => (r.estado ?? r.status) === "pendente").length);
+
+      const agRows = agResp.data || [];
+      setAgendamentosCount(agRows.length);
+
+      // pending tomorrow
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = tomorrow.toISOString().split("T")[0];
+      const pend: PendingAppt[] = agRows
+        .filter((r: any) => {
+          const status = (r.estado ?? r.status ?? "").toLowerCase();
+          if (!status.includes("pend")) return false;
+          const dt = r.data_marcacao ? new Date(r.data_marcacao).toISOString().split("T")[0] : "";
+          return dt === tomorrowStr;
+        })
+        .slice(0, 4)
+        .map((r: any) => {
+          const dt = r.data_marcacao ? new Date(r.data_marcacao) : null;
+          return {
+            id: r.id,
+            nome: r.paciente ?? r.nome_paciente ?? "—",
+            tipo: r.tipo ?? r.servico ?? "Consulta",
+            hora: dt ? dt.toTimeString().slice(0, 5) : "—",
+          };
+        });
+      setPendentes(pend);
+
+      // weekly appointments — last 8 weeks
+      const weeks: { name: string; value: number }[] = [];
+      const now = new Date();
+      for (let i = 7; i >= 0; i--) {
+        const start = new Date(now);
+        start.setDate(now.getDate() - (i + 1) * 7);
+        const end = new Date(now);
+        end.setDate(now.getDate() - i * 7);
+        const count = agRows.filter((r: any) => {
+          if (!r.data_marcacao) return false;
+          const d = new Date(r.data_marcacao);
+          return d >= start && d < end;
+        }).length;
+        weeks.push({ name: `Sem ${8 - i}`, value: count });
+      }
+      setWeeklyAppts(weeks);
+
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, [clienteId]);
+
+  const markResolved = async (id: number | string) => {
+    const { error } = await supabase.from("escalacoes").update({ estado: "resolvido" }).eq("id", id);
+    if (error) { toast.error("Erro ao actualizar."); return; }
     setEscalacoes(prev => prev.map(e => e.id === id ? { ...e, status: "resolvido" } : e));
+    setEscalacoesPendentes(p => Math.max(0, p - 1));
   };
 
   if (loading) {
@@ -78,6 +136,13 @@ export default function DashboardOverview() {
       </div>
     );
   }
+
+  const kpis = [
+    { label: "Agendamentos Este Mês", value: agendamentosCount, icon: CalendarCheck, trend: "Total acumulado", trendColor: "text-emerald-400" },
+    { label: "No-Shows Evitados", value: 0, icon: AlertTriangle, trend: "Este mês", trendColor: "text-primary" },
+    { label: "Escalações Pendentes", value: escalacoesPendentes, icon: TrendingUp, badge: true, badgeColor: escalacoesPendentes > 0 ? "bg-red-500/20 text-red-400 border-red-500/30" : "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", badgeText: escalacoesPendentes > 0 ? `${escalacoesPendentes} pendentes` : "Tudo resolvido" },
+    { label: "Próxima Faturação", value: 129, icon: CreditCard, isText: true, displayText: "—", badge: true, badgeColor: "bg-primary/20 text-primary border-primary/30", badgeText: "Em breve" },
+  ];
 
   return (
     <FadeIn>
@@ -112,7 +177,7 @@ export default function DashboardOverview() {
           <h3 className="font-display font-semibold mb-4">Agendamentos por Semana</h3>
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyAppointments}>
+              <BarChart data={weeklyAppts}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,20%,18%)" />
                 <XAxis dataKey="name" stroke="hsl(215,15%,60%)" fontSize={12} />
                 <YAxis stroke="hsl(215,15%,60%)" fontSize={12} />
@@ -142,14 +207,12 @@ export default function DashboardOverview() {
       <div className="gradient-border rounded-xl p-6 bg-card transition-all duration-300 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)] mb-8">
         <h3 className="font-display font-semibold mb-1">Confirmações Pendentes para Amanhã</h3>
         <p className="text-xs text-muted-foreground mb-4">Pacientes que ainda não confirmaram presença</p>
+        {pendentes.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">Todos os pacientes confirmaram presença para amanhã.</p>
+        ) : (
         <div className="space-y-3">
-          {[
-            { nome: "Ana Silva", tipo: "Consulta Geral", hora: "09:00" },
-            { nome: "João Costa", tipo: "Fisioterapia", hora: "10:30" },
-            { nome: "Maria Santos", tipo: "Nutrição", hora: "14:00" },
-            { nome: "Pedro Reis", tipo: "Psicologia", hora: "15:30" },
-          ].map((p, i) => (
-            <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-muted">
+          {pendentes.map(p => (
+            <div key={p.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium">{p.nome}</p>
                 <p className="text-xs text-muted-foreground">{p.tipo} · {p.hora}</p>
@@ -161,12 +224,16 @@ export default function DashboardOverview() {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {/* Bottom panels */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="gradient-border rounded-xl p-6 bg-card transition-all duration-300 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]">
           <h3 className="font-display font-semibold mb-4">Últimas Escalações</h3>
+          {escalacoes.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Sem escalações recentes.</p>
+          ) : (
           <div className="space-y-3">
             {escalacoes.map(e => (
               <div key={e.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted">
@@ -185,21 +252,26 @@ export default function DashboardOverview() {
               </div>
             ))}
           </div>
+          )}
         </div>
 
         <div className="gradient-border rounded-xl p-6 bg-card transition-all duration-300 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]">
           <h3 className="font-display font-semibold mb-4">Atividade Recente</h3>
+          {escalacoes.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Sem atividade recente.</p>
+          ) : (
           <div className="space-y-3">
-            {recentActivity.map((n, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-muted">
-                <n.icon size={16} className="text-primary mt-0.5 shrink-0" />
+            {escalacoes.map((e) => (
+              <div key={e.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted">
+                <Calendar size={16} className="text-primary mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm">{n.text}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{n.time}</p>
+                  <p className="text-sm">{e.paciente} — {e.status === "resolvido" ? "resolvida" : "nova escalação"}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{e.hora}</p>
                 </div>
               </div>
             ))}
           </div>
+          )}
         </div>
       </div>
     </FadeIn>
