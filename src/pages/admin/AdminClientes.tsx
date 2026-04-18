@@ -1,25 +1,68 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import FadeIn from "@/components/FadeIn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, LayoutGrid } from "lucide-react";
-import { mockClients, AdminClient } from "./adminData";
 import { Link } from "react-router-dom";
 import EmptyState from "@/components/EmptyState";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
 
 type PlanOption = "Prime" | "Scale" | "Executive";
 
+interface AdminClient {
+  id: number;
+  clinica: string;
+  email: string;
+  telefone: string;
+  plano: PlanOption;
+  estado: "Ativo" | "Suspenso";
+  proximaFaturacao: string;
+  escalacoes: number;
+}
+
+function normalizePlan(p: string | undefined): PlanOption {
+  const v = (p || "").toLowerCase();
+  if (v === "executive") return "Executive";
+  if (v === "scale") return "Scale";
+  return "Prime";
+}
+
 export default function AdminClientes() {
-  const [clients, setClients] = useState<AdminClient[]>(mockClients);
+  const [clients, setClients] = useState<AdminClient[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("todos");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingChange, setPendingChange] = useState<{ clientId: number; oldPlan: PlanOption; newPlan: PlanOption } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase.from("clientes").select("*");
+      if (!active) return;
+      if (error) { console.error(error); setLoading(false); return; }
+      const mapped: AdminClient[] = (data || []).map((r: any) => ({
+        id: r.cliente_id ?? r.id,
+        clinica: r.nome_clinica ?? r.nome ?? "—",
+        email: r.email ?? "—",
+        telefone: r.telefone ?? "—",
+        plano: normalizePlan(r.plano),
+        estado: (r.estado === "Suspenso" || r.estado === "suspenso") ? "Suspenso" : "Ativo",
+        proximaFaturacao: r.proxima_faturacao ?? "—",
+        escalacoes: r.escalacoes ?? 0,
+      }));
+      setClients(mapped);
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, []);
 
   const toggleEstado = (id: number) => {
     setClients(prev => prev.map(c => c.id === id ? { ...c, estado: c.estado === "Ativo" ? "Suspenso" : "Ativo" } : c));
@@ -31,9 +74,11 @@ export default function AdminClientes() {
     setConfirmOpen(true);
   };
 
-  const confirmPlanChange = () => {
+  const confirmPlanChange = async () => {
     if (!pendingChange) return;
     const { clientId, newPlan } = pendingChange;
+    const { error } = await supabase.from("clientes").update({ plano: newPlan.toLowerCase() }).eq("cliente_id", clientId);
+    if (error) { toast.error("Erro ao actualizar o plano."); return; }
     setClients(prev => prev.map(c => c.id === clientId ? { ...c, plano: newPlan } : c));
     localStorage.setItem(`cliente_plano_${clientId}`, newPlan.toLowerCase());
 
@@ -78,7 +123,11 @@ export default function AdminClientes() {
           <TabsTrigger value="executive">Executive</TabsTrigger>
         </TabsList>
         <TabsContent value={tab}>
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+            </div>
+          ) : filtered.length === 0 ? (
             <EmptyState icon={Search} title="Nenhum cliente encontrado" description="Tenta pesquisar por outro nome ou email." />
           ) : (
           <div className="gradient-border rounded-xl bg-card overflow-x-auto">

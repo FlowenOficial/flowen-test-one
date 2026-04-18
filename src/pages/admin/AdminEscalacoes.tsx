@@ -1,26 +1,70 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import FadeIn from "@/components/FadeIn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { NumberTicker } from "@/components/NumberTicker";
 import { AlertTriangle, CheckCircle2, Clock } from "lucide-react";
-import { mockEscalacoes as initialData } from "./adminData";
 import EmptyState from "@/components/EmptyState";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
 
-const kpis = [
-  { label: "Total Este Mês", value: 34, icon: AlertTriangle },
-  { label: "Pendentes", value: 8, icon: Clock, badge: "bg-red-500/20 text-red-400 border-red-500/30", badgeText: "Atenção" },
-  { label: "Resolvidas", value: 26, icon: CheckCircle2 },
-];
+interface Escalacao {
+  id: string | number;
+  clinica: string;
+  paciente: string;
+  motivo: string;
+  data: string;
+  status: "pendente" | "resolvido";
+}
 
 export default function AdminEscalacoes() {
-  const [data, setData] = useState(initialData);
+  const [data, setData] = useState<Escalacao[]>([]);
+  const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("todos");
 
-  const markResolved = (id: number) => {
-    setData(prev => prev.map(e => e.id === id ? { ...e, status: "resolvido" as const } : e));
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      setLoading(true);
+      const [escResp, cliResp] = await Promise.all([
+        supabase.from("escalacoes").select("*").order("criado_em", { ascending: false }),
+        supabase.from("clientes").select("cliente_id, nome_clinica"),
+      ]);
+      if (!active) return;
+      const clientesMap = new Map<number, string>();
+      (cliResp.data || []).forEach((c: any) => clientesMap.set(c.cliente_id ?? c.id, c.nome_clinica ?? "—"));
+      const mapped: Escalacao[] = (escResp.data || []).map((r: any) => ({
+        id: r.id,
+        clinica: clientesMap.get(r.cliente_id) ?? "—",
+        paciente: r.paciente ?? r.nome_paciente ?? "—",
+        motivo: r.motivo ?? r.mensagem ?? "—",
+        data: r.criado_em ? new Date(r.criado_em).toLocaleString("pt-PT") : "—",
+        status: ((r.estado ?? r.status) === "resolvido" ? "resolvido" : "pendente") as "pendente" | "resolvido",
+      }));
+      setData(mapped);
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, []);
+
+  const markResolved = async (id: string | number) => {
+    const { error } = await supabase.from("escalacoes").update({ estado: "resolvido" }).eq("id", id);
+    if (error) { toast.error("Erro ao actualizar."); return; }
+    setData(prev => prev.map(e => e.id === id ? { ...e, status: "resolvido" } : e));
+    toast.success("Escalação resolvida.");
   };
+
+  const total = data.length;
+  const pendentes = data.filter(e => e.status === "pendente").length;
+  const resolvidas = data.filter(e => e.status === "resolvido").length;
+
+  const kpis = [
+    { label: "Total Este Mês", value: total, icon: AlertTriangle },
+    { label: "Pendentes", value: pendentes, icon: Clock, badge: "bg-red-500/20 text-red-400 border-red-500/30", badgeText: "Atenção" },
+    { label: "Resolvidas", value: resolvidas, icon: CheckCircle2 },
+  ];
 
   const filtered = tab === "todos" ? data : data.filter(e => e.status === (tab === "pendentes" ? "pendente" : "resolvido"));
 
@@ -47,7 +91,11 @@ export default function AdminEscalacoes() {
           <TabsTrigger value="resolvidas">Resolvidas</TabsTrigger>
         </TabsList>
         <TabsContent value={tab}>
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+            </div>
+          ) : filtered.length === 0 ? (
             <EmptyState icon={CheckCircle2} title="Nenhuma escalação encontrada" description="Não existem escalações para este filtro." />
           ) : (
           <div className="gradient-border rounded-xl bg-card overflow-x-auto">

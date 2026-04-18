@@ -1,25 +1,78 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import FadeIn from "@/components/FadeIn";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { NumberTicker } from "@/components/NumberTicker";
-import { TrendingUp, CheckCircle2, XCircle } from "lucide-react";
-import { mockPagamentos } from "./adminData";
+import { TrendingUp, CheckCircle2, XCircle, CreditCard } from "lucide-react";
+import EmptyState from "@/components/EmptyState";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/lib/supabase";
 
-const kpis = [
-  { label: "Receita Este Mês", value: 2748, prefix: "€", icon: TrendingUp },
-  { label: "Pagamentos Bem-sucedidos", value: 22, icon: CheckCircle2 },
-  { label: "Pagamentos Falhados", value: 2, icon: XCircle, badge: "bg-red-500/20 text-red-400 border-red-500/30", badgeText: "Atenção" },
-];
+interface Pagamento {
+  id: string | number;
+  clinica: string;
+  plano: string;
+  valor: string;
+  valorNum: number;
+  data: string;
+  estado: "Pago" | "Falhado" | "Pendente";
+  metodo: string;
+}
 
 export default function AdminPagamentos() {
   const [tab, setTab] = useState("todos");
-  const filtered = tab === "todos" ? mockPagamentos : mockPagamentos.filter(p => {
+  const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      setLoading(true);
+      const [payResp, cliResp] = await Promise.all([
+        supabase.from("pagamentos").select("*").order("criado_em", { ascending: false }),
+        supabase.from("clientes").select("cliente_id, nome_clinica"),
+      ]);
+      if (!active) return;
+      const clientesMap = new Map<number, string>();
+      (cliResp.data || []).forEach((c: any) => clientesMap.set(c.cliente_id ?? c.id, c.nome_clinica ?? "—"));
+      const mapped: Pagamento[] = (payResp.data || []).map((r: any) => {
+        const v = Number(r.valor) || 0;
+        const estado = r.estado === "pago" || r.estado === "Pago" ? "Pago"
+          : r.estado === "falhado" || r.estado === "Falhado" ? "Falhado"
+          : "Pendente";
+        return {
+          id: r.id,
+          clinica: clientesMap.get(r.cliente_id) ?? "—",
+          plano: r.plano ?? "—",
+          valor: `€${v}`,
+          valorNum: v,
+          data: r.criado_em ? new Date(r.criado_em).toLocaleDateString("pt-PT") : "—",
+          estado: estado as "Pago" | "Falhado" | "Pendente",
+          metodo: r.metodo ?? "—",
+        };
+      });
+      setPagamentos(mapped);
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, []);
+
+  const filtered = tab === "todos" ? pagamentos : pagamentos.filter(p => {
     if (tab === "pagos") return p.estado === "Pago";
     if (tab === "falhados") return p.estado === "Falhado";
     return p.estado === "Pendente";
   });
-  const total = filtered.reduce((acc, p) => acc + parseInt(p.valor.replace(/[^0-9]/g, "")), 0);
+  const total = filtered.reduce((acc, p) => acc + p.valorNum, 0);
+
+  const receitaMes = pagamentos.filter(p => p.estado === "Pago").reduce((a, p) => a + p.valorNum, 0);
+  const sucessos = pagamentos.filter(p => p.estado === "Pago").length;
+  const falhados = pagamentos.filter(p => p.estado === "Falhado").length;
+
+  const kpis = [
+    { label: "Receita Este Mês", value: receitaMes, prefix: "€", icon: TrendingUp },
+    { label: "Pagamentos Bem-sucedidos", value: sucessos, icon: CheckCircle2 },
+    { label: "Pagamentos Falhados", value: falhados, icon: XCircle, badge: "bg-red-500/20 text-red-400 border-red-500/30", badgeText: "Atenção" },
+  ];
 
   const estadoBadge = (e: string) => {
     if (e === "Pago") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
@@ -51,6 +104,13 @@ export default function AdminPagamentos() {
           <TabsTrigger value="pendentes">Pendentes</TabsTrigger>
         </TabsList>
         <TabsContent value={tab}>
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+            </div>
+          ) : filtered.length === 0 ? (
+            <EmptyState icon={CreditCard} title="Nenhum pagamento encontrado" description="Não existem pagamentos para este filtro." />
+          ) : (
           <div className="gradient-border rounded-xl bg-card overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -83,6 +143,7 @@ export default function AdminPagamentos() {
               </tfoot>
             </table>
           </div>
+          )}
         </TabsContent>
       </Tabs>
     </FadeIn>
