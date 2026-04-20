@@ -24,6 +24,8 @@ const Login = () => {
   const [titleAmber, setTitleAmber] = useState(false);
 
   const handleTitleClick = () => {
+    // Only allow admin trigger for the official admin email
+    if (email.trim().toLowerCase() !== "centralflowen@gmail.com") return;
     const now = Date.now();
     if (clickCount.current === 0 || now - firstClickTime.current > 2000) {
       clickCount.current = 1;
