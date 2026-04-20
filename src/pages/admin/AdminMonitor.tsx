@@ -1,25 +1,11 @@
+import { useEffect, useState } from "react";
 import FadeIn from "@/components/FadeIn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/NumberTicker";
-import { Activity, Bot, AlertTriangle, Info, CheckCircle2 } from "lucide-react";
-import { mockClients } from "./adminData";
-
-const kpis = [
-  { label: "Agentes Ativos", value: 7, icon: Bot },
-  { label: "Workflows com Erro", value: 0, icon: Activity, badge: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", badgeText: "Sem erros" },
-  { label: "Follow-ups Hoje", value: 23, icon: Activity },
-  { label: "Triagens Este Mês", value: 34, icon: AlertTriangle },
-];
-
-const monitorData = mockClients.map(c => ({
-  clinica: c.clinica,
-  agenteIA: c.estado === "Ativo",
-  followups: c.plano !== "Prime" && c.estado === "Ativo",
-  lembretes: c.estado === "Ativo",
-  relatorio: c.id === 3 || c.id === 8 ? "Pendente" : c.estado === "Suspenso" ? "—" : "Gerado",
-  triagens: c.estado === "Suspenso" ? 0 : [3, 12, 1, 2, 0, 4, 5, 0][c.id - 1] || 0,
-}));
+import { Activity, Bot, AlertTriangle, Info, CheckCircle2, Server } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import EmptyState from "@/components/EmptyState";
 
 const alerts = [
   { icon: AlertTriangle, color: "text-amber-400", msg: "Nutri Saúde — Agente inativo (conta suspensa)", time: "Há 2 dias" },
@@ -28,6 +14,51 @@ const alerts = [
 ];
 
 export default function AdminMonitor() {
+  const [loading, setLoading] = useState(true);
+  const [monitorData, setMonitorData] = useState<Array<{ clinica: string; agenteIA: boolean; followups: boolean; lembretes: boolean; relatorio: string; triagens: number }>>([]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data } = await supabase.from("clientes").select("*");
+      if (!active) return;
+      const mapped = (data || []).map((c: any) => {
+        const activo = c.activo === true || c.estado === "Ativo" || c.estado === "ativo";
+        const pacote = (c.pacote || c.plano || "prime").toString().toLowerCase();
+        return {
+          clinica: c.nome_clinica ?? c.nome ?? "—",
+          agenteIA: activo,
+          followups: pacote !== "prime" && activo,
+          lembretes: activo,
+          relatorio: activo ? "Gerado" : "—",
+          triagens: 0,
+        };
+      });
+      setMonitorData(mapped);
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, []);
+
+  const agentesActivos = monitorData.filter(m => m.agenteIA).length;
+  const kpis = [
+    { label: "Agentes Ativos", value: agentesActivos, icon: Bot },
+    { label: "Workflows com Erro", value: 0, icon: Activity, badge: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", badgeText: "Sem erros" },
+    { label: "Follow-ups Hoje", value: monitorData.filter(m => m.followups).length, icon: Activity },
+    { label: "Triagens Este Mês", value: monitorData.reduce((a, m) => a + m.triagens, 0), icon: AlertTriangle },
+  ];
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => <div key={i} className="h-28 rounded-xl bg-muted animate-pulse" />)}
+        </div>
+        <div className="h-64 rounded-xl bg-muted animate-pulse" />
+      </div>
+    );
+  }
+
   return (
     <FadeIn>
       <div className="flex items-center gap-3 mb-6">
@@ -51,6 +82,11 @@ export default function AdminMonitor() {
         ))}
       </div>
 
+      {monitorData.length === 0 ? (
+        <div className="gradient-border rounded-xl bg-card mb-8">
+          <EmptyState icon={Server} title="Sem clínicas registadas" description="Quando houver clínicas activas, aparecem aqui." />
+        </div>
+      ) : (
       <div className="gradient-border rounded-xl bg-card overflow-x-auto mb-8">
         <table className="w-full text-sm">
           <thead>
@@ -97,6 +133,7 @@ export default function AdminMonitor() {
           </tbody>
         </table>
       </div>
+      )}
 
       <div className="gradient-border rounded-xl p-6 bg-card">
         <h3 className="font-display font-semibold mb-4">Alertas do Sistema</h3>

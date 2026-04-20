@@ -126,7 +126,11 @@ const Contacto = () => {
                   <Checkbox id="privacy" checked={privacy}
                     onCheckedChange={(c) => { setPrivacy(!!c); touch("privacy"); }} />
                   <Label htmlFor="privacy" className="text-sm text-muted-foreground leading-tight cursor-pointer">
-                    Concordo com a política de privacidade *
+                    Concordo com a{" "}
+                    <a href="/privacidade" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                      política de privacidade
+                    </a>{" "}
+                    *
                   </Label>
                 </div>
                 {errors.privacy && <p className="text-xs text-destructive">Deve concordar com a política de privacidade.</p>}

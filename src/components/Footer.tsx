@@ -20,7 +20,7 @@ const Footer = () => (
         <div>
           <h4 className="font-display text-sm font-semibold mb-3 text-foreground">Contacto</h4>
           <div className="flex flex-col gap-2 text-sm text-muted-foreground">
-            <span>info@flowen.pt</span>
+            <span>centralflowen@gmail.com</span>
             <span>Lisboa, Portugal</span>
           </div>
         </div>

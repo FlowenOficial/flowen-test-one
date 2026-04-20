@@ -175,9 +175,9 @@ export default function AdminClienteDetalhe() {
               <p><span className="text-muted-foreground">Estado:</span> <Badge className={`text-[10px] ${estado === "Ativo" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}`}>{estado}</Badge></p>
               <p><span className="text-muted-foreground">Próxima Faturação:</span> {client.proximaFaturacao}</p>
               <p><span className="text-muted-foreground">Valor:</span> €{plano === "Executive" ? "349" : plano === "Scale" ? "199" : "129"}</p>
-              <div className="flex items-center gap-2 mt-2">
-                <CreditCard size={16} className="text-muted-foreground" />
-                <span>•••• •••• •••• 4242</span>
+              <div className="flex items-center gap-2 mt-2 text-muted-foreground">
+                <CreditCard size={16} />
+                <span>Método de pagamento não configurado</span>
               </div>
             </div>
             <Button variant={estado === "Ativo" ? "destructive" : "default"} size="sm" onClick={() => setEstado(e => e === "Ativo" ? "Suspenso" : "Ativo")}>
