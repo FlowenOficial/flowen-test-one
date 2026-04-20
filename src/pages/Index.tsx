@@ -108,6 +108,8 @@ const testimonials = [
 const packages = [
   {
     name: "Prime", subtitle: "Organização Inicial",
+    price: "€199/mês",
+    setup: "+ €799 de setup (única vez)",
     features: [
       { icon: Bot, text: "Agente de Atendimento Inteligente (24/7)" },
       { icon: Calendar, text: "Agente de Agendamento Automático" },
@@ -119,6 +121,8 @@ const packages = [
   },
   {
     name: "Scale", subtitle: "Crescimento Estruturado", includes: "Inclui tudo do Prime +",
+    price: "€299/mês",
+    setup: "+ €899 de setup (única vez)",
     features: [
       { icon: UserCheck, text: "Agente de Gestão de Prioridades" },
       { icon: Heart, text: "Agente de Follow-Up e Relacionamento" },
@@ -293,6 +297,12 @@ const Index = () => {
                     )}
                     <h3 className="font-display text-2xl font-bold mb-1">{pkg.name}</h3>
                     <p className="text-sm text-muted-foreground mb-6">{pkg.subtitle}</p>
+                    {!pkg.unavailable && pkg.price && (
+                      <div className="mb-5">
+                        <p className="font-display text-3xl font-bold text-primary">{pkg.price}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{pkg.setup}</p>
+                      </div>
+                    )}
                     {pkg.includes && <p className="text-xs text-primary font-medium mb-4">{pkg.includes}</p>}
                     <div className="flex-1 space-y-3 mb-6">
                       {pkg.features.map((f, j) => (

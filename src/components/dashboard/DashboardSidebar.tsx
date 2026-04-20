@@ -18,6 +18,7 @@ import {
   Clock, Settings, FileText, UserX, Stethoscope,
 } from "lucide-react";
 import { getConfigSeccoes, type ConfigSeccoes } from "@/lib/seccoes";
+import { useAuth } from "@/contexts/AuthContext";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const iconMap: Record<string, any> = {
@@ -78,6 +79,7 @@ function SidebarItemWithTooltip({ collapsed, label, children }: { collapsed: boo
 
 export default function DashboardSidebar() {
   const { currentPlan } = usePlan();
+  const { clienteId } = useAuth();
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
@@ -86,9 +88,8 @@ export default function DashboardSidebar() {
   const [seccoes, setSeccoes] = useState<ConfigSeccoes>({});
 
   useEffect(() => {
-    // Load section config for client 1 (default)
-    setSeccoes(getConfigSeccoes(1));
-  }, []);
+    setSeccoes(getConfigSeccoes(clienteId || 1));
+  }, [clienteId]);
 
   const isSeccaoVisible = (seccaoId: string): "visible" | "em_breve" | "hidden" => {
     const cfg = seccoes[seccaoId];
