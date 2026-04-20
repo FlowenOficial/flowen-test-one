@@ -11,6 +11,7 @@ import Index from "./pages/Index";
 import Pacotes from "./pages/Pacotes";
 import Sobre from "./pages/Sobre";
 import Contacto from "./pages/Contacto";
+import Privacidade from "./pages/Privacidade";
 import Login from "./pages/Login";
 import DashboardLayout from "./pages/DashboardLayout";
 import DashboardOverview from "./pages/DashboardOverview";
@@ -84,6 +85,7 @@ const App = () => (
                 <Route path="/pacotes" element={<Pacotes />} />
                 <Route path="/sobre" element={<Sobre />} />
                 <Route path="/contacto" element={<Contacto />} />
+                <Route path="/privacidade" element={<Privacidade />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/dashboard" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
                   <Route index element={<DashboardOverview />} />
