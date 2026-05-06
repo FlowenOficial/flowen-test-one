@@ -87,7 +87,6 @@ export default function DashboardLayout() {
 
   const handleLogout = async () => {
     await signOut();
-    localStorage.removeItem("flowen_auth");
     navigate("/");
   };
 

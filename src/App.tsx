@@ -41,19 +41,16 @@ const queryClient = new QueryClient();
 
 const ProtectedRoute = ({ children }: { children: ReactNode }) => {
   const { user, loading } = useAuth();
-  // Also keep localStorage fallback for admin mode
-  const isLocalAuth = localStorage.getItem("flowen_auth") === "true";
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
-  if (!user && !isLocalAuth) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
 const AdminRoute = ({ children }: { children: ReactNode }) => {
   const { user, loading } = useAuth();
-  const isLocalAuth = localStorage.getItem("flowen_auth") === "true";
   const isAdmin = localStorage.getItem("adminMode") === "true";
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
-  if ((!user && !isLocalAuth) || !isAdmin) return <Navigate to="/login" replace />;
+  if (!user || !isAdmin) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
