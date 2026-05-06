@@ -54,7 +54,6 @@ const Login = () => {
       toast({ title: "Erro de autenticação", description: "Email ou palavra-passe incorretos.", variant: "destructive" });
       return;
     }
-    localStorage.setItem("flowen_auth", "true");
     if (localStorage.getItem("adminMode") === "true") {
       navigate("/admin");
     } else {
